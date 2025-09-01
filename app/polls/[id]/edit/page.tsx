@@ -1,55 +1,93 @@
 "use client"
 
+import { useState, useEffect, FormEvent } from "react"
+import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Plus, X, Loader2 } from "lucide-react"
-import { useState, FormEvent } from "react"
-import { useRouter } from "next/navigation"
-import { toast } from "@/components/ui/use-toast"
-import { CreatePollRequest } from "@/app/types"
+import { useToast } from "@/components/ui/use-toast"
+import { Loader2, Plus, X } from "lucide-react"
 import { useAuth } from "@/app/contexts/auth-context"
+import { Poll } from "@/app/types"
 
-export default function CreatePollPage() {
+export default function EditPollPage() {
   const router = useRouter()
+  const params = useParams()
   const { user } = useAuth()
+  const { toast } = useToast()
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [options, setOptions] = useState(["", ""])
+  const [options, setOptions] = useState<{id: string, text: string}[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [errors, setErrors] = useState<{ [key: string]: string }>({})
+  const [poll, setPoll] = useState<Poll | null>(null)
 
-  const addOption = () => {
-    setOptions([...options, ""])
-  }
-
-  const removeOption = (index: number) => {
-    if (options.length > 2) {
-      setOptions(options.filter((_, i) => i !== index))
+  useEffect(() => {
+    const fetchPoll = async () => {
+      setIsLoading(true)
+      try {
+        // Get auth token from localStorage
+        const token = localStorage.getItem("auth_token")
+        const headers: HeadersInit = {}
+        
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`
+        }
+        
+        const response = await fetch(`/api/polls/${params.id}`, {
+          headers
+        })
+        
+        if (!response.ok) {
+          throw new Error("Failed to fetch poll")
+        }
+        
+        const pollData = await response.json()
+        setPoll(pollData)
+        
+        // Set form data
+        setTitle(pollData.title)
+        setDescription(pollData.description || "")
+        setOptions(pollData.options.map((opt: any) => ({ id: opt.id, text: opt.text })))
+        
+        // Check if user is the creator
+        if (user && user.id !== pollData.created_by) {
+          toast({
+            title: "Unauthorized",
+            description: "You don't have permission to edit this poll",
+            variant: "destructive"
+          })
+          router.push(`/polls/${params.id}`)
+        }
+      } catch (error) {
+        console.error("Error fetching poll:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load poll data",
+          variant: "destructive"
+        })
+        router.push("/polls")
+      } finally {
+        setIsLoading(false)
+      }
     }
-  }
+    
+    if (user) {
+      fetchPoll()
+    }
+  }, [params.id, user, router, toast])
 
-  const updateOption = (index: number, value: string) => {
-    const newOptions = [...options]
-    newOptions[index] = value
-    setOptions(newOptions)
-  }
-  
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {}
-    
-    if (!user) {
-      newErrors.general = "You must be logged in to create a poll"
-    }
     
     if (!title.trim()) {
       newErrors.title = "Title is required"
     }
     
-    // Check if at least two options are provided
-    const validOptions = options.filter(opt => opt.trim() !== "")
+    const validOptions = options.filter(opt => opt.text.trim() !== "")
     if (validOptions.length < 2) {
       newErrors.options = "At least two options are required"
     }
@@ -57,7 +95,24 @@ export default function CreatePollPage() {
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
-  
+
+  const updateOption = (index: number, value: string) => {
+    const newOptions = [...options]
+    newOptions[index] = { ...newOptions[index], text: value }
+    setOptions(newOptions)
+  }
+
+  const addOption = () => {
+    setOptions([...options, { id: `new-${Date.now()}`, text: "" }])
+  }
+
+  const removeOption = (index: number) => {
+    if (options.length <= 2) return
+    const newOptions = [...options]
+    newOptions.splice(index, 1)
+    setOptions(newOptions)
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     
@@ -69,9 +124,9 @@ export default function CreatePollPage() {
     
     try {
       // Filter out empty options
-      const validOptions = options.filter(opt => opt.trim() !== "")
+      const validOptions = options.filter(opt => opt.text.trim() !== "")
       
-      const pollData: CreatePollRequest = {
+      const pollData = {
         title,
         description: description || undefined,
         options: validOptions
@@ -80,8 +135,8 @@ export default function CreatePollPage() {
       // Get auth token from localStorage
       const token = localStorage.getItem("auth_token")
       
-      const response = await fetch("/api/polls", {
-        method: "POST",
+      const response = await fetch(`/api/polls/${params.id}`, {
+        method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
@@ -91,23 +146,21 @@ export default function CreatePollPage() {
       
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to create poll")
+        throw new Error(errorData.error || "Failed to update poll")
       }
       
-      const poll = await response.json()
-      
       toast({
-        title: "Poll Created",
-        description: "Your poll has been created successfully."
+        title: "Poll Updated",
+        description: "Your poll has been updated successfully."
       })
       
-      // Redirect to the polls page
-      router.push('/polls')
+      // Redirect to the poll page
+      router.push(`/polls/${params.id}`)
     } catch (error) {
-      console.error("Error creating poll:", error)
+      console.error("Error updating poll:", error)
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to create poll",
+        description: error instanceof Error ? error.message : "Failed to update poll",
         variant: "destructive"
       })
     } finally {
@@ -115,13 +168,24 @@ export default function CreatePollPage() {
     }
   }
 
+  if (isLoading) {
+    return (
+      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[50vh]">
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p>Loading poll data...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-2xl">
       <Card>
         <CardHeader>
-          <CardTitle>Create a New Poll</CardTitle>
+          <CardTitle>Edit Poll</CardTitle>
           <CardDescription>
-            Create an engaging poll for your community to vote on
+            Update your poll details and options
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -164,10 +228,10 @@ export default function CreatePollPage() {
               )}
               <div className="space-y-3">
                 {options.map((option, index) => (
-                  <div key={index} className="flex gap-2">
+                  <div key={option.id} className="flex gap-2">
                     <Input
                       placeholder={`Option ${index + 1}`}
-                      value={option}
+                      value={option.text}
                       onChange={(e) => updateOption(index, e.target.value)}
                       required
                     />
@@ -204,17 +268,17 @@ export default function CreatePollPage() {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating...
+                    Updating...
                   </>
                 ) : (
-                  "Create Poll"
+                  "Update Poll"
                 )}
               </Button>
               <Button 
                 type="button" 
                 variant="outline" 
                 className="flex-1"
-                onClick={() => router.push("/polls")}
+                onClick={() => router.push(`/polls/${params.id}`)}
                 disabled={isSubmitting}
               >
                 Cancel
