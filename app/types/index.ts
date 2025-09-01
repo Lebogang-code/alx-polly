@@ -40,6 +40,15 @@ export interface CreatePollRequest {
   expiresAt?: Date
 }
 
+export interface EditPollFormData {
+  title: string
+  description?: string
+  options: {
+    id: string
+    text: string
+  }[]
+}
+
 export interface AuthResponse {
   user: User
   token: string
