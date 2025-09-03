@@ -1,25 +1,51 @@
-import { CreatePollRequest, Poll, PollOption } from '@/app/types';
+import { CreatePollRequest, Poll, PollOption, EditPollFormData } from '@/app/types'
+import { supabaseClient } from './supabase-client'
+import { getAuthHeaders, requireAuth, getCurrentUserId } from './auth-utils'
+import { validateCreatePollRequest, validatePollId, validateOptionId } from './validation'
+import { 
+  ApiResponse, 
+  PollOperationError, 
+  NetworkError, 
+  AuthenticationError,
+  createSuccessResponse,
+  createErrorResponse 
+} from './error-handler'
 
 /**
- * Fetches all polls from the API
- * @returns Promise with array of polls
+ * Centralized poll operations service
+ * Provides modular, type-safe poll management with standardized error handling
  */
-export async function fetchPolls(): Promise<Poll[]> {
-  const token = localStorage.getItem("auth_token");
-  const headers: HeadersInit = {};
-  
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+export class PollService {
+  private client = supabaseClient.getClient()
+
+  /**
+   * Fetches all polls from the database
+   * @returns Promise with standardized API response containing polls array
+   */
+  async fetchPolls(): Promise<ApiResponse<Poll[]>> {
+    try {
+      const { data: polls, error } = await this.client
+        .from('polls')
+        .select(`
+          *,
+          options:poll_options(*),
+          votes:votes(count)
+        `)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        throw new PollOperationError(`Failed to fetch polls: ${error.message}`, 'FETCH_ERROR')
+      }
+
+      return createSuccessResponse(polls || [])
+    } catch (error) {
+      if (error instanceof PollOperationError) {
+        return createErrorResponse(error.message, error.code)
+      }
+      return createErrorResponse('An unexpected error occurred while fetching polls', 'UNKNOWN_ERROR')
+    }
   }
-  
-  const response = await fetch("/api/polls", { headers });
-  
-  if (!response.ok) {
-    throw new Error("Failed to fetch polls");
-  }
-  
-  return await response.json();
-}
 
 /**
  * Fetches a specific poll by ID
