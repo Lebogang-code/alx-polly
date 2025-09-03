@@ -47,27 +47,43 @@ export class PollService {
     }
   }
 
-/**
- * Fetches a specific poll by ID
- * @param id - The poll ID to fetch
- * @returns Promise with the poll data
- */
-export async function fetchPollById(id: string): Promise<Poll> {
-  const token = localStorage.getItem("auth_token");
-  const headers: HeadersInit = {};
-  
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  /**
+   * Fetches a specific poll by ID
+   * @param id - The poll ID to fetch
+   * @returns Promise with standardized API response containing poll data
+   */
+  async fetchPollById(id: string): Promise<ApiResponse<Poll>> {
+    try {
+      // Validate poll ID
+      validatePollId(id)
+
+      const { data: poll, error } = await this.client
+        .from('polls')
+        .select(`
+          *,
+          options:poll_options(*),
+          votes:votes(count),
+          created_by:profiles(id, name, email)
+        `)
+        .eq('id', id)
+        .eq('is_active', true)
+        .single()
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          throw new PollOperationError('Poll not found', 'POLL_NOT_FOUND')
+        }
+        throw new PollOperationError(`Failed to fetch poll: ${error.message}`, 'FETCH_ERROR')
+      }
+
+      return createSuccessResponse(poll)
+    } catch (error) {
+      if (error instanceof PollOperationError) {
+        return createErrorResponse(error.message, error.code)
+      }
+      return createErrorResponse('An unexpected error occurred while fetching the poll', 'UNKNOWN_ERROR')
+    }
   }
-  
-  const response = await fetch(`/api/polls/${id}`, { headers });
-  
-  if (!response.ok) {
-    throw new Error("Failed to fetch poll");
-  }
-  
-  return await response.json();
-}
 
 /**
  * Creates a new poll
